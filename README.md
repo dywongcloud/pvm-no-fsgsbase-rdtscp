@@ -16,3 +16,8 @@ No behaviour change on feature-complete hosts. Verified end-to-end: a full Ubunt
 microVM boots to a shell on a Tencent CVM lacking both features.
 
 **Base:** [virt-pvm/linux](https://github.com/virt-pvm/linux) `pvm-612` (Linux 6.12.33) · **License:** GPL-2.0
+
+# Where to read more:
+```
+https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/
+```
