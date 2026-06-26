@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[RFC PATCH 0/4] KVM: x86/PVM: run the switcher and guest without FSGSBASE/RDTSCP</title>
+</head>
+<body style="margin:0;padding:24px;background:#f6f8fa;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#24292e;">
+<div style="max-width:980px;margin:0 auto;background:#ffffff;border:1px solid #d1d5da;border-radius:6px;overflow:hidden;">
+<div style="padding:12px 16px;background:#24292e;color:#ffffff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;">
+[RFC PATCH 0/4] KVM: x86/PVM: run the switcher and guest without FSGSBASE/RDTSCP
+</div>
+<pre style="margin:0;padding:16px;overflow-x:auto;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:12.5px;line-height:1.45;color:#24292e;background:#ffffff;"><span style="color:#6f42c1;font-weight:bold">From:</span>         Dylan Wong &lt;dyowng-AT-global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">To:</span>         linux-kernel-AT-vger.kernel.org
+<span style="color:#6f42c1;font-weight:bold">Subject:</span>         [RFC PATCH 0/4] KVM: x86/PVM: run the switcher and guest without FSGSBASE/RDTSCP
+<span style="color:#6f42c1;font-weight:bold">Date:</span>         Sat, 27 Jun 2026 06:13:50 +0800
+<span style="color:#6f42c1;font-weight:bold">Message-ID:</span>         &lt;20260627061350.33643-1-dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">Cc:</span>         Lai Jiangshan &lt;jiangshanlai-AT-gmail.com&gt;, Hou Wenlong &lt;houwenlong.hwl-AT-antgroup.com&gt;, Sean Christopherson &lt;seanjc-AT-google.com&gt;, Paolo Bonzini &lt;pbonzini-AT-redhat.com&gt;, Thomas Gleixner &lt;tglx-AT-linutronix.de&gt;, Borislav Petkov &lt;bp-AT-alien8.de&gt;, Ingo Molnar &lt;mingo-AT-redhat.com&gt;, x86-AT-kernel.org, kvm-AT-vger.kernel.org
+<span style="color:#6f42c1;font-weight:bold">Archive-link:</span>         Article
+
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+
+Hello,
+
+This series lets the Pagetable-based Virtual Machine (PVM) hypervisor [1] run
+on hosts whose CPUs do not expose FSGSBASE and/or RDTSCP -- in particular on
+commodity cloud instances whose virtual CPUs mask those features out of guest
+CPUID for live-migration portability. The motivating target is a Tencent Cloud
+CVM (Intel Xeon E5-2600 v4, Rocky Linux 10) on which both features are hidden:
+
+  $ grep -o -e fsgsbase -e rdtscp /proc/cpuinfo
+  $            # nothing -- both masked by the L0 hypervisor
+
+On such a host the goal is to run Firecracker microVMs with no hardware
+virtualization at all (no VT-x/AMD-V/nested-virt, no host /dev/kvm), using PVM
+to provide /dev/kvm in software.
+
+Today PVM hard-refuses to load on these hosts:
+
+  /* arch/x86/kvm/pvm/pvm.c, hardware_cap_check() */
+  if (!boot_cpu_has(X86_FEATURE_FSGSBASE)) {
+          pr_warn(&quot;FSGSBASE is required per PVM specification.\n&quot;);
+          return -EOPNOTSUPP;
+  }
+  if (!boot_cpu_has(X86_FEATURE_RDTSCP)) {
+          pr_warn(&quot;RDTSCP is required to support for getcpu in guest vdso.\n&quot;);
+          return -EOPNOTSUPP;
+  }
+
+Neither feature can simply be un-masked. Writing CR4.FSGSBASE from the guest is
+#GP-rejected by the L0 (KVM validates guest CR4 against guest CPUID), and RDTSCP
+genuinely #UDs -- the L0 does not enable the instruction in the VMCS, so it is
+not merely a hidden CPUID bit. They have to be worked around, and there are
+three distinct places PVM depends on them.
+
+Design
+======
+
+1. The host switcher (FSGSBASE). The mode-switch trampoline in
+   arch/x86/entry/entry_64_switcher.S runs in host ring 0 and uses
+   RD/WRGSBASE to move the guest GS base across the umod&lt;-&gt;smod boundary. In
+   ring 0 the same effect is available through SWAPGS + MSR_KERNEL_GS_BASE.
+   Patch 1 wraps each direct-switch sequence in an ALTERNATIVE keyed on
+   X86_FEATURE_FSGSBASE -- the fast RD/WRGSBASE path is kept verbatim (the
+   leading jmp is patched to NOPs when the feature is present, so there is zero
+   added cost on capable hosts), and an MSR-based fallback runs otherwise. The
+   fallback differs from the paranoid_entry idiom in one respect: these paths
+   pass the guest GPRs straight through, and RD/WRMSR clobber RAX/RCX/RDX, so
+   RAX (syscall nr / return value) and RDX (arg3) are saved and restored around
+   the MSR access. Both fallbacks reproduce the exact architectural end state of
+   the fast path (active gsbase == smod/user gsbase, MSR_KERNEL_GS_BASE == host
+   gsbase).
+
+2. Guest RDTSCP (host emulation). PVM points the guest&#x27;s vdso getcpu at RDTSCP
+   (vdso_read_cpunode(), via an X86_FEATURE_KVM_PVM_GUEST alternative) because a
+   PVM guest&#x27;s GDT is hypervisor-managed and LSL-from-GDT does not work. On a
+   host without RDTSCP the guest cannot execute it. Patches 2 and 3 trap-and-
+   emulate it: KVM&#x27;s emulator gains an em_rdtscp() executor (it previously had
+   only a privilege-check DIP entry for RDTSCP) flagged EmulateOnUD, and PVM
+   routes guest *user-mode* #UD through handle_ud() instead of reflecting it
+   straight to the guest (stock VMX/SVM already handle all guest #UD that way).
+   The two hardware_cap_check() gates become informational pr_info()s.
+
+3. Guest FSGSBASE. The PVM *guest* kernel is a separate binary and uses
+   RD/WRFSBASE unconditionally for MSR_FS_BASE in its paravirt MSR helpers,
+   because PVM guarantees the feature to its guests. On a host without FSGSBASE
+   the guest #UD-storms in early boot (RIP: pvm_write_msr, &quot;f3 48 0f ae d1&quot; =
+   WRFSBASE). Patch 4 gates that use on cpu_feature_enabled(X86_FEATURE_FSGSBASE)
+   and otherwise defers to the existing PVM_HC_RD/WRMSR hypercall -- the same
+   mechanism the MSR_GS_BASE case already uses.
+
+None of the changes alter behaviour on a feature-complete host: the ALTERNATIVE,
+the EmulateOnUD flag, and the runtime cpu_feature_enabled() check all keep the
+native fast path where the hardware supports it.
+
+Testing
+=======
+
+The switcher fallback was first validated as a state machine over 3,000,000
+randomized inputs (including non-canonical addresses): the MSR fallback is
+bit-identical to the FSGSBASE fast path and preserves the guest RAX/RDX, while a
+deliberately broken variant fails the same test. objtool validated the patched
+switcher object with no new warnings and the .altinstructions section decoded to
+exactly two FSGSBASE-gated entries.
+
+On the target host (kernel booted with pti=off), kvm-pvm now loads, creates
+/dev/kvm, and Firecracker boots a full Ubuntu 24.04 guest to a shell with zero
+&quot;invalid opcode&quot; oopses. RDTSCP emulation was confirmed by executing the raw
+RDTSCP opcode from an mmap&#x27;d page inside the guest (sched_getcpu() alone is not a
+proof: modern glibc reads the rseq cache and never executes the instruction). It
+returned a valid TSC with no SIGILL.
+
+Performance (target host; native = same box, for reference):
+
+  workload                native        PVM guest     ratio
+  CPU compute (loop)      0.957 s       1.113 s       1.16x
+  getpid syscall          445 ns        759 ns        1.7x
+  fork+exec x3000         1.53 s        5.59 s        3.6x
+  fork x3000              0.81 s        3.48 s        4.3x
+  raw RDTSC (native)      ~native       ~native       1x
+  raw RDTSCP (emulated)   n/a           ~3.35 us      trap
+  microVM boot            --            1.3 s         --
+
+Compute is near native; fork/syscall-heavy work pays PVM&#x27;s software-switcher and
+software-MMU tax (inherent to PVM, mildly amplified by the MSR-gsbase fallback
+and the FS-base hypercall on context switches). The RDTSCP emulation is ~3 us per
+call but a cold path in practice (glibc getcpu uses rseq). A host that exposes
+both features natively avoids the amplification and the emulation entirely.
+
+  arch/x86/entry/entry_64_switcher.S | 81 +++++++++++++++++++++++++++++++++++---
+  arch/x86/kvm/emulate.c             | 14 ++++++-
+  arch/x86/kvm/pvm/pvm.c             | 26 ++++++------
+  arch/x86/kernel/pvm.c              | 16 ++++++--
+  4 files changed, 115 insertions(+), 22 deletions(-)
+
+[1] KVM: x86/PVM: Introduce a new hypervisor -- https://lwn.net/Articles/963718/
+    PVM tree: https://github.com/virt-pvm/linux (pvm-612, Linux 6.12.33)
+
+Dylan Wong (4):
+  x86/entry: PVM switcher gsbase switch without FSGSBASE
+  KVM: x86: emulate RDTSCP on #UD
+  KVM: x86/PVM: soft-gate FSGSBASE/RDTSCP and emulate guest user-mode #UD
+  x86/pvm: read/write guest FS base via hypercall without FSGSBASE
+
+<span style="color:#6a737d">--</span>
+2.52.0
+
+
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
+<span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 1/4] x86/entry: PVM switcher gsbase switch without FSGSBASE
+
+The PVM switcher uses RDGSBASE/WRGSBASE in its two direct-switch paths to move
+the guest GS base between umod and smod without a full VM exit, so the switcher
+cannot run on hosts that lack FSGSBASE (or are booted with &quot;nofsgsbase&quot;).
+
+The switcher runs in host ring 0, where the active GS base can be read/written
+via SWAPGS + MSR_KERNEL_GS_BASE. Wrap both direct-switch GS-base sequences in an
+ALTERNATIVE on X86_FEATURE_FSGSBASE: when present, the leading &quot;jmp &lt;fallback&gt;&quot;
+is patched to NOPs and the fast RD/WRGSBASE path runs (zero added overhead);
+when absent, an MSR-based fallback runs.
+
+Unlike paranoid_entry, these paths pass the guest GPRs straight through.
+RD/WRMSR clobber RAX/RCX/RDX; on these paths RAX (guest syscall nr / return
+value) and RDX (arg3) carry live guest state, so the fallback saves and restores
+RAX/RDX around the MSR access (RCX is reloaded by the surrounding code). Both
+fallback paths reproduce the exact end state of the FSGSBASE fast path.
+
+Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="background:#ffeef0;color:#b31d28">---</span>
+ arch/x86/entry/entry_64_switcher.S | 81 +++++++++++++++++++++++++++---
+ 1 file changed, 74 insertions(+), 7 deletions(-)
+
+<span style="color:#6a737d;font-weight:bold">diff --git a/arch/x86/entry/entry_64_switcher.S b/arch/x86/entry/entry_64_switcher.S</span>
+<span style="color:#6a737d;font-weight:bold">index c8d704316..99d6c4e03 100644</span>
+<span style="color:#6a737d;font-weight:bold">--- a/arch/x86/entry/entry_64_switcher.S</span>
+<span style="color:#6a737d;font-weight:bold">+++ b/arch/x86/entry/entry_64_switcher.S</span>
+<span style="color:#005cc5">@@ -158,13 +158,50 @@ SYM_INNER_LABEL(entry_SYSCALL_64_switcher_safe_stack, SYM_L_GLOBAL)</span>
+ 	movq	%rcx, RIP-ORIG_RAX(%rsp)
+ 	movq	TSS_extra(smod_gsbase), %r11
+ 
+<span style="background:#ffeef0;color:#b31d28">-	/* switch host gsbase to guest gsbase, TSS_extra can&#x27;t be use afterward */</span>
+<span style="background:#ffeef0;color:#b31d28">-	swapgs</span>
+<span style="background:#e6ffed;color:#22863a">+	/*</span>
+<span style="background:#e6ffed;color:#22863a">+	 * Switch host gsbase to guest gsbase, save the guest user-mode gsbase</span>
+<span style="background:#e6ffed;color:#22863a">+	 * into the PVCS and load smod_gsbase as the active gsbase.  TSS_extra</span>
+<span style="background:#e6ffed;color:#22863a">+	 * can&#x27;t be used afterward.</span>
+<span style="background:#e6ffed;color:#22863a">+	 *</span>
+<span style="background:#e6ffed;color:#22863a">+	 * With FSGSBASE, swap to the guest gsbase and use rd/wrgsbase (fast).</span>
+<span style="background:#e6ffed;color:#22863a">+	 * Without FSGSBASE those instructions are unavailable, so manipulate</span>
+<span style="background:#e6ffed;color:#22863a">+	 * MSR_KERNEL_GS_BASE directly and let the trailing swapgs install</span>
+<span style="background:#e6ffed;color:#22863a">+	 * smod_gsbase as the active gsbase.  Both paths leave the active</span>
+<span style="background:#e6ffed;color:#22863a">+	 * gsbase == smod_gsbase and MSR_KERNEL_GS_BASE == host gsbase.</span>
+<span style="background:#e6ffed;color:#22863a">+	 */</span>
+<span style="background:#e6ffed;color:#22863a">+	ALTERNATIVE &quot;jmp .L_ds_to_smod_no_fsgsbase&quot;, &quot;&quot;, X86_FEATURE_FSGSBASE</span>
+ 
+<span style="background:#ffeef0;color:#b31d28">-	/* save guest gsbase as user_gsbase and switch to smod_gsbase */</span>
+<span style="background:#e6ffed;color:#22863a">+	/* FSGSBASE fast path */</span>
+<span style="background:#e6ffed;color:#22863a">+	swapgs</span>
+ 	rdgsbase %rcx
+ 	movq	%rcx, PVCS_user_gsbase(%rdi)
+ 	wrgsbase %r11
+<span style="background:#e6ffed;color:#22863a">+	jmp	.L_ds_to_smod_gsbase_done</span>
+<span style="background:#e6ffed;color:#22863a">+</span>
+<span style="background:#e6ffed;color:#22863a">+.L_ds_to_smod_no_fsgsbase:</span>
+<span style="background:#e6ffed;color:#22863a">+	/*</span>
+<span style="background:#e6ffed;color:#22863a">+	 * rd/wrmsr clobber rax/rcx/rdx.  rcx is reloaded below, but rax (guest</span>
+<span style="background:#e6ffed;color:#22863a">+	 * syscall nr) and rdx (guest syscall arg3) must reach smod intact, so</span>
+<span style="background:#e6ffed;color:#22863a">+	 * save and restore them around the MSR accesses.</span>
+<span style="background:#e6ffed;color:#22863a">+	 */</span>
+<span style="background:#e6ffed;color:#22863a">+	pushq	%rax</span>
+<span style="background:#e6ffed;color:#22863a">+	pushq	%rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	/* read the guest user gsbase from MSR_KERNEL_GS_BASE (edx:eax) */</span>
+<span style="background:#e6ffed;color:#22863a">+	movl	$MSR_KERNEL_GS_BASE, %ecx</span>
+<span style="background:#e6ffed;color:#22863a">+	rdmsr</span>
+<span style="background:#e6ffed;color:#22863a">+	shlq	$32, %rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	orq	%rdx, %rax</span>
+<span style="background:#e6ffed;color:#22863a">+	movq	%rax, PVCS_user_gsbase(%rdi)</span>
+<span style="background:#e6ffed;color:#22863a">+	/* program MSR_KERNEL_GS_BASE with smod_gsbase, swapgs makes it active */</span>
+<span style="background:#e6ffed;color:#22863a">+	movq	%r11, %rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	movl	%r11d, %eax</span>
+<span style="background:#e6ffed;color:#22863a">+	shrq	$32, %rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	movl	$MSR_KERNEL_GS_BASE, %ecx</span>
+<span style="background:#e6ffed;color:#22863a">+	wrmsr</span>
+<span style="background:#e6ffed;color:#22863a">+	popq	%rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	popq	%rax</span>
+<span style="background:#e6ffed;color:#22863a">+	swapgs</span>
+<span style="background:#e6ffed;color:#22863a">+.L_ds_to_smod_gsbase_done:</span>
+ 
+ 	/* restore umod rdi and smod rflags/r11, rip/rcx and rsp for sysretq */
+ 	popq	%rdi
+<span style="color:#005cc5">@@ -204,13 +241,45 @@ SYM_INNER_LABEL(entry_SYSRETQ_switcher_unsafe_stack, SYM_L_GLOBAL)</span>
+ 	movq	TSS_extra(umod_cr3), %rcx
+ 	movq	%rcx, %cr3
+ 
+<span style="background:#ffeef0;color:#b31d28">-	/* switch host gsbase to guest gsbase, TSS_extra can&#x27;t be use afterward */</span>
+<span style="background:#ffeef0;color:#b31d28">-	swapgs</span>
+<span style="background:#e6ffed;color:#22863a">+	/*</span>
+<span style="background:#e6ffed;color:#22863a">+	 * Switch host gsbase to guest gsbase and install the guest user-mode</span>
+<span style="background:#e6ffed;color:#22863a">+	 * gsbase as the active gsbase.  TSS_extra can&#x27;t be used afterward.</span>
+<span style="background:#e6ffed;color:#22863a">+	 *</span>
+<span style="background:#e6ffed;color:#22863a">+	 * With FSGSBASE, swap to the guest gsbase and use wrgsbase (fast).</span>
+<span style="background:#e6ffed;color:#22863a">+	 * Without FSGSBASE, write the user gsbase into MSR_KERNEL_GS_BASE and</span>
+<span style="background:#e6ffed;color:#22863a">+	 * let the trailing swapgs install it as the active gsbase.  Both paths</span>
+<span style="background:#e6ffed;color:#22863a">+	 * leave the active gsbase == user gsbase and MSR_KERNEL_GS_BASE == host</span>
+<span style="background:#e6ffed;color:#22863a">+	 * gsbase.</span>
+<span style="background:#e6ffed;color:#22863a">+	 */</span>
+<span style="background:#e6ffed;color:#22863a">+	ALTERNATIVE &quot;jmp .L_ds_to_umod_no_fsgsbase&quot;, &quot;&quot;, X86_FEATURE_FSGSBASE</span>
+ 
+<span style="background:#ffeef0;color:#b31d28">-	/* write umod gsbase */</span>
+<span style="background:#e6ffed;color:#22863a">+	/* FSGSBASE fast path */</span>
+<span style="background:#e6ffed;color:#22863a">+	swapgs</span>
+ 	movq	PVCS_user_gsbase(%rdi), %rcx
+ 	canonical_rcx
+ 	wrgsbase %rcx
+<span style="background:#e6ffed;color:#22863a">+	jmp	.L_ds_to_umod_gsbase_done</span>
+<span style="background:#e6ffed;color:#22863a">+</span>
+<span style="background:#e6ffed;color:#22863a">+.L_ds_to_umod_no_fsgsbase:</span>
+<span style="background:#e6ffed;color:#22863a">+	/*</span>
+<span style="background:#e6ffed;color:#22863a">+	 * wrmsr clobbers rax/rcx/rdx.  rcx is reloaded below, but rax (guest</span>
+<span style="background:#e6ffed;color:#22863a">+	 * syscall return value) and rdx must reach umod intact, so save and</span>
+<span style="background:#e6ffed;color:#22863a">+	 * restore them around the MSR access.</span>
+<span style="background:#e6ffed;color:#22863a">+	 */</span>
+<span style="background:#e6ffed;color:#22863a">+	pushq	%rax</span>
+<span style="background:#e6ffed;color:#22863a">+	pushq	%rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	movq	PVCS_user_gsbase(%rdi), %rcx</span>
+<span style="background:#e6ffed;color:#22863a">+	canonical_rcx</span>
+<span style="background:#e6ffed;color:#22863a">+	/* program MSR_KERNEL_GS_BASE with the user gsbase, swapgs makes it active */</span>
+<span style="background:#e6ffed;color:#22863a">+	movq	%rcx, %rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	movl	%ecx, %eax</span>
+<span style="background:#e6ffed;color:#22863a">+	shrq	$32, %rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	movl	$MSR_KERNEL_GS_BASE, %ecx</span>
+<span style="background:#e6ffed;color:#22863a">+	wrmsr</span>
+<span style="background:#e6ffed;color:#22863a">+	popq	%rdx</span>
+<span style="background:#e6ffed;color:#22863a">+	popq	%rax</span>
+<span style="background:#e6ffed;color:#22863a">+	swapgs</span>
+<span style="background:#e6ffed;color:#22863a">+.L_ds_to_umod_gsbase_done:</span>
+ 
+ 	/* load flags, ip to sp0 stack and cx, r11, rdi to registers */
+ 	movl	PVCS_eflags(%rdi), %r11d
+<span style="color:#6a737d">-- </span>
+2.52.0
+
+
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
+<span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 2/4] KVM: x86: emulate RDTSCP on #UD
+
+The instruction emulator had only a privilege-check DIP entry for RDTSCP and no
+executor, so it could not emulate the instruction on a host where it is
+unavailable. Add em_rdtscp() (TSC into EDX:EAX, IA32_TSC_AUX into ECX, modelled
+on em_rdtsc()) and flag the opcode EmulateOnUD so KVM emulates it precisely when
+the host cannot execute it. This is used by PVM (patch 3) to keep the guest vdso
+getcpu working on hosts that mask RDTSCP.
+
+Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="background:#ffeef0;color:#b31d28">---</span>
+ arch/x86/kvm/emulate.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+<span style="color:#6a737d;font-weight:bold">diff --git a/arch/x86/kvm/emulate.c b/arch/x86/kvm/emulate.c</span>
+<span style="color:#6a737d;font-weight:bold">index e72aed25d..e2b1d4870 100644</span>
+<span style="color:#6a737d;font-weight:bold">--- a/arch/x86/kvm/emulate.c</span>
+<span style="color:#6a737d;font-weight:bold">+++ b/arch/x86/kvm/emulate.c</span>
+<span style="color:#005cc5">@@ -3219,6 +3219,18 @@ static int em_rdtsc(struct x86_emulate_ctxt *ctxt)</span>
+ 	return X86EMUL_CONTINUE;
+ }
+ 
+<span style="background:#e6ffed;color:#22863a">+static int em_rdtscp(struct x86_emulate_ctxt *ctxt)</span>
+<span style="background:#e6ffed;color:#22863a">+{</span>
+<span style="background:#e6ffed;color:#22863a">+	u64 tsc = 0, tsc_aux = 0;</span>
+<span style="background:#e6ffed;color:#22863a">+</span>
+<span style="background:#e6ffed;color:#22863a">+	ctxt-&gt;ops-&gt;get_msr(ctxt, MSR_IA32_TSC, &amp;tsc);</span>
+<span style="background:#e6ffed;color:#22863a">+	*reg_write(ctxt, VCPU_REGS_RAX) = (u32)tsc;</span>
+<span style="background:#e6ffed;color:#22863a">+	*reg_write(ctxt, VCPU_REGS_RDX) = tsc &gt;&gt; 32;</span>
+<span style="background:#e6ffed;color:#22863a">+	ctxt-&gt;ops-&gt;get_msr(ctxt, MSR_TSC_AUX, &amp;tsc_aux);</span>
+<span style="background:#e6ffed;color:#22863a">+	*reg_write(ctxt, VCPU_REGS_RCX) = (u32)tsc_aux;</span>
+<span style="background:#e6ffed;color:#22863a">+	return X86EMUL_CONTINUE;</span>
+<span style="background:#e6ffed;color:#22863a">+}</span>
+<span style="background:#e6ffed;color:#22863a">+</span>
+ static int em_rdpmc(struct x86_emulate_ctxt *ctxt)
+ {
+ 	u64 pmc;
+<span style="color:#005cc5">@@ -4012,7 +4024,7 @@ static const struct opcode group7_rm3[] = {</span>
+ 
+ static const struct opcode group7_rm7[] = {
+ 	N,
+<span style="background:#ffeef0;color:#b31d28">-	DIP(SrcNone, rdtscp, check_rdtsc),</span>
+<span style="background:#e6ffed;color:#22863a">+	IIP(ImplicitOps | EmulateOnUD, em_rdtscp, rdtscp, check_rdtsc),</span>
+ 	N, N, N, N, N, N,
+ };
+ 
+<span style="color:#6a737d">-- </span>
+2.52.0
+
+
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
+<span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 3/4] KVM: x86/PVM: soft-gate FSGSBASE/RDTSCP and emulate
+ guest user-mode #UD
+
+With the switcher (patch 1) and the emulator (patch 2) handling the absence of
+FSGSBASE and RDTSCP, drop the two hard -EOPNOTSUPP gates in
+hardware_cap_check() to informational pr_info()s.
+
+The guest vdso getcpu executes RDTSCP in guest *user* mode, but PVM reflects
+user-mode #UD straight back to the guest without consulting the emulator. Route
+both supervisor- and user-mode #UD through handle_ud(), which emulates the
+EmulateOnUD allowlist (now including RDTSCP) and reflects #UD back to the guest
+for everything else -- the same behaviour stock VMX/SVM already implement for all
+guest #UD.
+
+Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="background:#ffeef0;color:#b31d28">---</span>
+ arch/x86/kvm/pvm/pvm.c | 26 +++++++++++++-------------
+ 1 file changed, 13 insertions(+), 13 deletions(-)
+
+<span style="color:#6a737d;font-weight:bold">diff --git a/arch/x86/kvm/pvm/pvm.c b/arch/x86/kvm/pvm/pvm.c</span>
+<span style="color:#6a737d;font-weight:bold">index c069e5a9a..78f614a91 100644</span>
+<span style="color:#6a737d;font-weight:bold">--- a/arch/x86/kvm/pvm/pvm.c</span>
+<span style="color:#6a737d;font-weight:bold">+++ b/arch/x86/kvm/pvm/pvm.c</span>
+<span style="color:#005cc5">@@ -2159,10 +2159,14 @@ static int handle_exit_exception(struct kvm_vcpu *vcpu)</span>
+ 		}
+ 		return 1;
+ 	case UD_VECTOR:
+<span style="background:#ffeef0;color:#b31d28">-		if (!is_smod(pvm)) {</span>
+<span style="background:#ffeef0;color:#b31d28">-			kvm_queue_exception(vcpu, UD_VECTOR);</span>
+<span style="background:#ffeef0;color:#b31d28">-			return 1;</span>
+<span style="background:#ffeef0;color:#b31d28">-		}</span>
+<span style="background:#e6ffed;color:#22863a">+		/*</span>
+<span style="background:#e6ffed;color:#22863a">+		 * Route both supervisor- and user-mode #UD through handle_ud().</span>
+<span style="background:#e6ffed;color:#22863a">+		 * It emulates only the EmulateOnUD allowlist -- notably RDTSCP,</span>
+<span style="background:#e6ffed;color:#22863a">+		 * so the guest vdso getcpu keeps working on hosts where the CPU</span>
+<span style="background:#e6ffed;color:#22863a">+		 * does not expose RDTSCP -- and reflects #UD back to the guest</span>
+<span style="background:#e6ffed;color:#22863a">+		 * for everything else, preserving the previous behaviour. (Stock</span>
+<span style="background:#e6ffed;color:#22863a">+		 * VMX/SVM likewise handle all guest #UD via handle_ud().)</span>
+<span style="background:#e6ffed;color:#22863a">+		 */</span>
+ 		return handle_ud(vcpu);
+ 	case DB_VECTOR:
+ 		return handle_exit_debug(vcpu);
+<span style="color:#005cc5">@@ -3136,14 +3140,12 @@ static int __init hardware_cap_check(void)</span>
+ 		pr_warn(&quot;Support for host FRED is not included yet.\n&quot;);
+ 		return -EOPNOTSUPP;
+ 	}
+<span style="background:#ffeef0;color:#b31d28">-	if (!boot_cpu_has(X86_FEATURE_FSGSBASE)) {</span>
+<span style="background:#ffeef0;color:#b31d28">-		pr_warn(&quot;FSGSBASE is required per PVM specification.\n&quot;);</span>
+<span style="background:#ffeef0;color:#b31d28">-		return -EOPNOTSUPP;</span>
+<span style="background:#ffeef0;color:#b31d28">-	}</span>
+<span style="background:#ffeef0;color:#b31d28">-	if (!boot_cpu_has(X86_FEATURE_RDTSCP)) {</span>
+<span style="background:#ffeef0;color:#b31d28">-		pr_warn(&quot;RDTSCP is required to support for getcpu in guest vdso.\n&quot;);</span>
+<span style="background:#ffeef0;color:#b31d28">-		return -EOPNOTSUPP;</span>
+<span style="background:#ffeef0;color:#b31d28">-	}</span>
+<span style="background:#e6ffed;color:#22863a">+	if (!boot_cpu_has(X86_FEATURE_FSGSBASE))</span>
+<span style="background:#e6ffed;color:#22863a">+		pr_info(&quot;FSGSBASE not available; the switcher will use the slower &quot;</span>
+<span style="background:#e6ffed;color:#22863a">+			&quot;MSR-based gsbase switching fallback.\n&quot;);</span>
+<span style="background:#e6ffed;color:#22863a">+	if (!boot_cpu_has(X86_FEATURE_RDTSCP))</span>
+<span style="background:#e6ffed;color:#22863a">+		pr_info(&quot;RDTSCP not available; guest vdso getcpu RDTSCP will be &quot;</span>
+<span style="background:#e6ffed;color:#22863a">+			&quot;trapped and emulated (slower).\n&quot;);</span>
+ 	if (!boot_cpu_has(X86_FEATURE_CX16)) {
+ 		pr_warn(&quot;CMPXCHG16B is required for guest.\n&quot;);
+ 		return -EOPNOTSUPP;
+<span style="color:#6a737d">-- </span>
+2.52.0
+
+
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
+<span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 4/4] x86/pvm: read/write guest FS base via hypercall
+ without FSGSBASE
+
+The PVM guest paravirt MSR helpers use RD/WRFSBASE unconditionally for
+MSR_FS_BASE, so a PVM guest #UD-storms in early boot on a host that lacks
+FSGSBASE (RIP: pvm_write_msr, &quot;f3 48 0f ae d1&quot; = WRFSBASE). Gate the FSGSBASE
+instructions on cpu_feature_enabled(X86_FEATURE_FSGSBASE) and otherwise defer
+the FS base read/write to the hypervisor via PVM_HC_RD/WRMSR -- the mechanism the
+MSR_GS_BASE case already uses.
+
+Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="background:#ffeef0;color:#b31d28">---</span>
+ arch/x86/kernel/pvm.c | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+<span style="color:#6a737d;font-weight:bold">diff --git a/arch/x86/kernel/pvm.c b/arch/x86/kernel/pvm.c</span>
+<span style="color:#6a737d;font-weight:bold">index 3642ccf05..d54a6d6a3 100644</span>
+<span style="color:#6a737d;font-weight:bold">--- a/arch/x86/kernel/pvm.c</span>
+<span style="color:#6a737d;font-weight:bold">+++ b/arch/x86/kernel/pvm.c</span>
+<span style="color:#005cc5">@@ -94,7 +94,10 @@ static unsigned long long pvm_read_msr_safe(unsigned int msr, int *err)</span>
+ 	switch (msr) {
+ 	case MSR_FS_BASE:
+ 		*err = 0;
+<span style="background:#ffeef0;color:#b31d28">-		return rdfsbase();</span>
+<span style="background:#e6ffed;color:#22863a">+		if (cpu_feature_enabled(X86_FEATURE_FSGSBASE))</span>
+<span style="background:#e6ffed;color:#22863a">+			return rdfsbase();</span>
+<span style="background:#e6ffed;color:#22863a">+		/* No FSGSBASE: defer the FS base read to the hypervisor. */</span>
+<span style="background:#e6ffed;color:#22863a">+		return pvm_hypercall1(PVM_HC_RDMSR, msr);</span>
+ 	case MSR_KERNEL_GS_BASE:
+ 		*err = 0;
+ 		return this_cpu_read(pvm_vcpu_struct.user_gsbase);
+<span style="color:#005cc5">@@ -107,7 +110,10 @@ static unsigned long long pvm_read_msr(unsigned int msr)</span>
+ {
+ 	switch (msr) {
+ 	case MSR_FS_BASE:
+<span style="background:#ffeef0;color:#b31d28">-		return rdfsbase();</span>
+<span style="background:#e6ffed;color:#22863a">+		if (cpu_feature_enabled(X86_FEATURE_FSGSBASE))</span>
+<span style="background:#e6ffed;color:#22863a">+			return rdfsbase();</span>
+<span style="background:#e6ffed;color:#22863a">+		/* No FSGSBASE: defer the FS base read to the hypervisor. */</span>
+<span style="background:#e6ffed;color:#22863a">+		return pvm_hypercall1(PVM_HC_RDMSR, msr);</span>
+ 	case MSR_KERNEL_GS_BASE:
+ 		return this_cpu_read(pvm_vcpu_struct.user_gsbase);
+ 	default:
+<span style="color:#005cc5">@@ -122,7 +128,11 @@ static int notrace pvm_write_msr_safe(unsigned int msr, u32 low, u32 high)</span>
+ 
+ 	switch (msr) {
+ 	case MSR_FS_BASE:
+<span style="background:#ffeef0;color:#b31d28">-		wrfsbase(base);</span>
+<span style="background:#e6ffed;color:#22863a">+		if (cpu_feature_enabled(X86_FEATURE_FSGSBASE))</span>
+<span style="background:#e6ffed;color:#22863a">+			wrfsbase(base);</span>
+<span style="background:#e6ffed;color:#22863a">+		else</span>
+<span style="background:#e6ffed;color:#22863a">+			/* No FSGSBASE: defer the FS base write to the hypervisor. */</span>
+<span style="background:#e6ffed;color:#22863a">+			pvm_hypercall2(PVM_HC_WRMSR, msr, base);</span>
+ 		return 0;
+ 	case MSR_KERNEL_GS_BASE:
+ 		this_cpu_write(pvm_vcpu_struct.user_gsbase, base);
+<span style="color:#6a737d">-- </span>
+2.52.0
+</pre>
+</div>
+</body></html>
