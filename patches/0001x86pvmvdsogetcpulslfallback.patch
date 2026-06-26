@@ -1,0 +1,93 @@
+From 3361d9f2ca3fd20e065324c32f6758525e60b55f Mon Sep 17 00:00:00 2001
+From: Dylan Wong <dylanwong007@gmail.com>
+Date: Wed, 24 Jun 2026 00:00:00 +0000
+Subject: [PATCH] x86/pvm: fall back to LSL for vDSO getcpu when the host lacks
+ RDTSCP
+
+The PVM guest patches vdso_read_cpunode() so user-space getcpu() uses
+RDTSCP instead of LSL, avoiding GDT-shadow-page syncing during core
+migration.  The RDTSCP arm of the alternative was gated solely on
+X86_FEATURE_KVM_PVM_GUEST, so a PVM guest told (via CPUID) that the host
+has no RDTSCP would still get RDTSCP patched into the vDSO and fault when
+user space calls getcpu(): the instruction runs on the host hardware the
+guest's ring-3 code executes on.
+
+Make the RDTSCP optimization conditional on (KVM_PVM_GUEST && RDTSCP).
+An ALTERNATIVE arm carries a single feature bit, so introduce a synthetic
+software-defined feature X86_FEATURE_PVM_RDTSCP and set it (once, on the
+BSP) in identify_boot_cpu() after the CPUID scan has populated RDTSCP and
+before both the kernel and vDSO ALTERNATIVE passes.  vdso_read_cpunode()
+gates the RDTSCP arm on the new bit; when it is unset the alternative is
+not patched in and the default LSL instruction is used, with the existing
+shared bitmask unpacking (cpu = p & VDSO_CPUNODE_MASK, node = p >>
+VDSO_CPUNODE_BITS).  The RDPID arm and non-PVM behavior are unchanged.
+
+Signed-off-by: Dylan Wong <dylanwong007@gmail.com>
+---
+ arch/x86/include/asm/cpufeatures.h |  1 +
+ arch/x86/include/asm/segment.h     |  8 ++++++--
+ arch/x86/kernel/cpu/common.c       | 13 +++++++++++++
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/arch/x86/include/asm/cpufeatures.h b/arch/x86/include/asm/cpufeatures.h
+index 72ef58a..a71f3aa 100644
+--- a/arch/x86/include/asm/cpufeatures.h
++++ b/arch/x86/include/asm/cpufeatures.h
+@@ -239,6 +239,7 @@
+ #define X86_FEATURE_TDX_GUEST		( 8*32+22) /* Intel Trust Domain Extensions Guest */
+ #define X86_FEATURE_KVM_PVM_GUEST	( 8*32+23) /* KVM Pagetable-based Virtual Machine guest */
+ #define X86_FEATURE_PV_GUEST		( 8*32+24) /* "" Paravirtual guest */
++#define X86_FEATURE_PVM_RDTSCP		( 8*32+25) /* "" PVM guest may use RDTSCP for vDSO getcpu */
+ 
+ /* Intel-defined CPU features, CPUID level 0x00000007:0 (EBX), word 9 */
+ #define X86_FEATURE_FSGSBASE		( 9*32+ 0) /* RDFSBASE, WRFSBASE, RDGSBASE, WRGSBASE instructions*/
+diff --git a/arch/x86/include/asm/segment.h b/arch/x86/include/asm/segment.h
+index 5559669..942f228 100644
+--- a/arch/x86/include/asm/segment.h
++++ b/arch/x86/include/asm/segment.h
+@@ -254,12 +254,16 @@ static inline void vdso_read_cpunode(unsigned *cpu, unsigned *node)
+ 	 *
+ 	 * If RDPID is available, use it.
+ 	 *
+-	 * If it is PVM guest and RDPID is not available, use RDTSCP.
++	 * If it is a PVM guest whose host supports RDTSCP and RDPID is not
++	 * available, use RDTSCP.  X86_FEATURE_PVM_RDTSCP is set only when both
++	 * X86_FEATURE_KVM_PVM_GUEST and X86_FEATURE_RDTSCP are present, so on a
++	 * host without RDTSCP this arm is not patched in and the default LSL is
++	 * used instead.
+ 	 */
+ 	alternative_io_2("lsl %[seg],%[p]",
+ 			 ".byte 0x0f,0x01,0xf9\n\t" /* RDTSCP %eax:%edx, %ecx */
+ 			 "mov %%ecx,%%eax\n\t",
+-			 X86_FEATURE_KVM_PVM_GUEST,
++			 X86_FEATURE_PVM_RDTSCP,
+ 			 ".byte 0xf3,0x0f,0xc7,0xf8", /* RDPID %eax/rax */
+ 			 X86_FEATURE_RDPID,
+ 			 [p] "=a" (p), [seg] "r" (__CPUNODE_SEG)
+diff --git a/arch/x86/kernel/cpu/common.c b/arch/x86/kernel/cpu/common.c
+index 8987455..69d8ce4 100644
+--- a/arch/x86/kernel/cpu/common.c
++++ b/arch/x86/kernel/cpu/common.c
+@@ -1979,6 +1979,19 @@ void enable_sep_cpu(void)
+ static __init void identify_boot_cpu(void)
+ {
+ 	identify_cpu(&boot_cpu_data);
++
++	/*
++	 * A PVM guest may only use RDTSCP for the vDSO getcpu() optimization
++	 * when the underlying host actually supports RDTSCP; otherwise it must
++	 * fall back to LSL.  RDTSCP is now known (identify_cpu() above ran the
++	 * CPUID scan) and this runs before both the kernel and the vDSO image
++	 * ALTERNATIVE passes, so record the compound condition in a synthetic
++	 * feature bit that the vdso_read_cpunode() alternative gates on.
++	 */
++	if (cpu_feature_enabled(X86_FEATURE_KVM_PVM_GUEST) &&
++	    boot_cpu_has(X86_FEATURE_RDTSCP))
++		setup_force_cpu_cap(X86_FEATURE_PVM_RDTSCP);
++
+ 	if (HAS_KERNEL_IBT && cpu_feature_enabled(X86_FEATURE_IBT))
+ 		pr_info("CET detected: Indirect Branch Tracking enabled\n");
+ #ifdef CONFIG_X86_32
+-- 
+2.43.0
+
