@@ -3,87 +3,253 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KVM x86/PVM on cloud CPUs without FSGSBASE or RDTSCP | Firecracker without nested virtualization</title>  <meta name="description" content="RFC patch series for KVM x86/PVM that lets Pagetable-based Virtual Machine run without FSGSBASE or RDTSCP, enabling Firecracker microVMs on cloud CPUs where those features are masked.">
+  <title>KVM x86/PVM without FSGSBASE or RDTSCP | Firecracker without nested virtualization</title>
+  <meta name="description" content="RFC patch series for KVM x86/PVM that lets Pagetable-based Virtual Machine run on commodity cloud CPUs without FSGSBASE or RDTSCP, with Firecracker boot, verification milestones, and benchmarks.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+  <meta name="author" content="Dylan Wong">
+  <meta name="theme-color" content="#24292e">
   <link rel="canonical" href="https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/">
-<meta name="google-site-verification" content="MkXEz3ftweLEKx8f_4e6J0Ja7kJl5SOYCboOJygIBvk" />
+  <link rel="alternate" type="text/plain" href="https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/llms.txt" title="LLM-readable summary">
+  <meta name="google-site-verification" content="MkXEz3ftweLEKx8f_4e6J0Ja7kJl5SOYCboOJygIBvk">
+
   <meta property="og:type" content="article">
-  <meta property="og:title" content="KVM PVM without FSGSBASE or RDTSCP">
-  <meta property="og:description" content="Patches for KVM x86/PVM to run on cloud CPUs where FSGSBASE and RDTSCP are masked, with Firecracker boot and benchmark results.">
+  <meta property="og:site_name" content="Dylan Wong Cloud Research Notes">
+  <meta property="og:title" content="KVM x86/PVM without FSGSBASE or RDTSCP">
+  <meta property="og:description" content="Patches for KVM x86/PVM to run on cloud CPUs where FSGSBASE and RDTSCP are masked, with Firecracker boot, milestone verification, and benchmark results.">
   <meta property="og:url" content="https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="KVM PVM without FSGSBASE or RDTSCP">
-  <meta name="twitter:description" content="RFC patch series for running Pagetable-based Virtual Machine on hosts without FSGSBASE/RDTSCP and booting Firecracker without nested virtualization.">
-<script async src="https://cdn.ampproject.org/v0.js"></script>
+  <meta property="og:image" content="https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/pvm-milestones-verification.png">
+  <meta property="og:image:width" content="1666">
+  <meta property="og:image:height" content="598">
+  <meta property="og:image:alt" content="Seven verification milestones for the KVM x86/PVM FSGSBASE and RDTSCP fallback patch series.">
+  <meta property="article:author" content="Dylan Wong">
+  <meta property="article:published_time" content="2026-06-27T06:13:50+08:00">
+  <meta property="article:modified_time" content="2026-06-27T06:13:50+08:00">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="KVM x86/PVM without FSGSBASE or RDTSCP">
+  <meta name="twitter:description" content="RFC patch series for running Pagetable-based Virtual Machine on cloud CPUs without FSGSBASE/RDTSCP and booting Firecracker without nested virtualization.">
+  <meta name="twitter:image" content="https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/pvm-milestones-verification.png">
+
   <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "TechArticle",
-  "headline": "KVM PVM without FSGSBASE or RDTSCP",
-  "alternativeHeadline": "RFC patch series for running x86/PVM on hosts where FSGSBASE and RDTSCP are masked",
-  "description": "RFC patch series for KVM x86/PVM that lets Pagetable-based Virtual Machine run without FSGSBASE or RDTSCP and boot Firecracker microVMs on cloud CPUs where those features are masked.",
-  "author": {
-    "@type": "Person",
-    "name": "Dylan Wong"
-  },
-  "datePublished": "2026-06-27",
-  "dateModified": "2026-06-27",
-  "mainEntityOfPage": {
-    "@type": "WebPage",
-    "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/"
-  },
-  "keywords": [
-    "KVM PVM",
-    "x86/PVM",
-    "Pagetable-based Virtual Machine",
-    "PVM without FSGSBASE",
-    "PVM without RDTSCP",
-    "Firecracker without nested virtualization",
-    "software KVM",
-    "/dev/kvm without VT-x",
-    "RDTSCP emulation",
-    "FSGSBASE fallback",
-    "Tencent Cloud CVM PVM"
-  ],
-  "about": [
-  {
-    "@type": "Thing",
-    "name": "KVM x86/PVM",
-    "alternateName": "Pagetable-based Virtual Machine",
-    "sameAs": "https://github.com/virt-pvm/linux"
-  },
-  {
-    "@type": "Thing",
-    "name": "Firecracker",
-    "sameAs": "https://github.com/firecracker-microvm/firecracker"
-  }
-],
-"mentions": [
-  {
-    "@type": "Organization",
-    "name": "Alibaba Cloud"
-  },
-  {
-    "@type": "Organization",
-    "name": "Ant Group"
-  },
-  {
-    "@type": "Thing",
-    "name": "FSGSBASE"
-  },
-  {
-    "@type": "Thing",
-    "name": "RDTSCP"
-  },
-  {
-    "@type": "Thing",
-    "name": "Kata Containers"
-  },
-  {
-    "@type": "Thing",
-    "name": "OpenAnolis"
-  }
-]
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#webpage",
+      "url": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/",
+      "name": "KVM x86/PVM without FSGSBASE or RDTSCP",
+      "description": "RFC patch series for KVM x86/PVM that lets Pagetable-based Virtual Machine run on commodity cloud CPUs where FSGSBASE and RDTSCP are unavailable, enabling Firecracker microVM experiments without nested virtualization.",
+      "isPartOf": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#website"
+      },
+      "breadcrumb": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#breadcrumb"
+      },
+      "primaryImageOfPage": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#milestone-image"
+      },
+      "mainEntity": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#techarticle"
+      },
+      "about": [
+        {
+          "@type": "Thing",
+          "name": "KVM x86/PVM",
+          "alternateName": "Pagetable-based Virtual Machine",
+          "sameAs": "https://github.com/virt-pvm/linux"
+        },
+        {
+          "@type": "Thing",
+          "name": "Firecracker",
+          "sameAs": "https://github.com/firecracker-microvm/firecracker"
+        },
+        {
+          "@type": "Thing",
+          "name": "FSGSBASE"
+        },
+        {
+          "@type": "Thing",
+          "name": "RDTSCP"
+        }
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#website",
+      "url": "https://dywongcloud.github.io/",
+      "name": "Dylan Wong Cloud Research Notes",
+      "publisher": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#author"
+      }
+    },
+    {
+      "@type": "Person",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#author",
+      "name": "Dylan Wong",
+      "url": "https://dywongcloud.github.io/"
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#breadcrumb",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "https://dywongcloud.github.io/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "KVM x86/PVM without FSGSBASE or RDTSCP",
+          "item": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/"
+        }
+      ]
+    },
+    {
+      "@type": "ImageObject",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#milestone-image",
+      "url": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/pvm-milestones-verification.png",
+      "contentUrl": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/pvm-milestones-verification.png",
+      "width": 1666,
+      "height": 598,
+      "caption": "Seven verification milestones for the KVM x86/PVM FSGSBASE and RDTSCP fallback patch series.",
+      "creator": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#author"
+      }
+    },
+    {
+      "@type": "TechArticle",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#techarticle",
+      "headline": "KVM x86/PVM without FSGSBASE or RDTSCP",
+      "alternativeHeadline": "RFC patch series for running Pagetable-based Virtual Machine on cloud CPUs where FSGSBASE and RDTSCP are masked",
+      "description": "This RFC patch series changes hard PVM FSGSBASE and RDTSCP requirements into fallback paths: MSR-based GS-base switching, RDTSCP #UD trap-and-emulation, and guest FS-base PVM hypercalls.",
+      "author": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#author"
+      },
+      "datePublished": "2026-06-27",
+      "dateModified": "2026-06-27",
+      "mainEntityOfPage": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#webpage"
+      },
+      "image": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#milestone-image"
+      },
+      "keywords": [
+        "KVM PVM",
+        "x86/PVM",
+        "Pagetable-based Virtual Machine",
+        "PVM without FSGSBASE",
+        "PVM without RDTSCP",
+        "Firecracker without nested virtualization",
+        "software /dev/kvm",
+        "RDTSCP emulation",
+        "FSGSBASE fallback",
+        "Tencent Cloud CVM PVM",
+        "Alibaba Cloud PVM",
+        "Ant Group PVM"
+      ],
+      "about": [
+        {
+          "@type": "Thing",
+          "name": "KVM x86/PVM",
+          "alternateName": "Pagetable-based Virtual Machine",
+          "sameAs": "https://github.com/virt-pvm/linux"
+        },
+        {
+          "@type": "Thing",
+          "name": "Firecracker",
+          "sameAs": "https://github.com/firecracker-microvm/firecracker"
+        }
+      ],
+      "mentions": [
+        {
+          "@type": "Organization",
+          "name": "Alibaba Cloud"
+        },
+        {
+          "@type": "Organization",
+          "name": "Ant Group"
+        },
+        {
+          "@type": "Thing",
+          "name": "Kata Containers"
+        },
+        {
+          "@type": "Thing",
+          "name": "OpenAnolis"
+        },
+        {
+          "@type": "Thing",
+          "name": "FSGSBASE"
+        },
+        {
+          "@type": "Thing",
+          "name": "RDTSCP"
+        }
+      ],
+      "citation": [
+        "https://lwn.net/Articles/963718/",
+        "https://patchew.org/linux/20240226143630.33643-1-jiangshanlai%40gmail.com/",
+        "https://github.com/virt-pvm/linux",
+        "https://github.com/firecracker-microvm/firecracker"
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What does this KVM x86/PVM patch series do?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It lets PVM run on hosts where FSGSBASE and RDTSCP are unavailable by adding an MSR-based GS-base switcher fallback, RDTSCP trap-and-emulation, soft capability gates, and guest FS-base hypercall fallback paths."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why does this matter for cloud CPUs?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Commodity cloud hypervisors can mask CPU features such as FSGSBASE and RDTSCP for live-migration portability. Without fallback paths, PVM can refuse to load before it creates /dev/kvm."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can this boot Firecracker microVMs without nested virtualization?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The test target booted a Firecracker Ubuntu 24.04 guest through PVM-provided /dev/kvm without host VT-x, AMD-V, nested virtualization, or hardware KVM exposure."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What performance was observed?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The reported target showed near-native CPU compute at 1.16x, getpid at 1.7x, fork+exec at 3.6x, fork at 4.3x, emulated RDTSCP around 3.35 microseconds, and Firecracker guest boot around 1.3 seconds."
+          }
+        }
+      ]
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#patch-series",
+      "name": "KVM x86/PVM FSGSBASE and RDTSCP fallback RFC patch series",
+      "programmingLanguage": [
+        "C",
+        "x86-64 Assembly"
+      ],
+      "runtimePlatform": "Linux kernel KVM x86/PVM",
+      "codeRepository": "https://github.com/virt-pvm/linux",
+      "author": {
+        "@id": "https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/#author"
+      },
+      "description": "Four-patch RFC series adding fallback behavior for PVM hosts and guests without FSGSBASE or RDTSCP."
+    }
+  ]
 }
   </script>
 
@@ -99,8 +265,11 @@
       --green-bg: #dafbe1;
       --green-text: #116329;
       --code-bg: #f6f8fa;
+      --warn-bg: #fff8c5;
+      --warn-text: #7d4e00;
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
       padding: 24px;
@@ -108,9 +277,10 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       color: var(--text);
       line-height: 1.55;
+      text-rendering: optimizeLegibility;
     }
     .page {
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
     }
     .hero, .card {
@@ -142,11 +312,22 @@
       font-size: 22px;
       line-height: 1.2;
     }
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 17px;
+      line-height: 1.25;
+    }
     p { margin: 0 0 14px; }
     .lead {
-      max-width: 850px;
+      max-width: 900px;
       color: var(--muted);
       font-size: 18px;
+    }
+    .answer-box {
+      border-left: 4px solid var(--blue);
+      padding: 12px 14px;
+      background: #f6f8ff;
+      margin: 18px 0 0;
     }
     .links {
       display: flex;
@@ -192,14 +373,54 @@
       border: 1px solid var(--border);
       padding: 8px 10px;
       text-align: left;
+      vertical-align: top;
     }
     th { background: var(--code-bg); }
-    code {
+    code, kbd {
       padding: 2px 5px;
       border-radius: 5px;
       background: var(--code-bg);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
       font-size: 0.92em;
+    }
+    .claim-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .mini-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+    .mini-card strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    .note {
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border: 1px solid #eac54f;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .figure {
+      margin: 14px 0 0;
+    }
+    .figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #24292e;
+    }
+    figcaption {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
     }
     .archive-title {
       padding: 12px 16px;
@@ -213,11 +434,25 @@
       font-size: 14px;
     }
     .keywords strong { color: var(--text); }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     @media (max-width: 760px) {
       body { padding: 12px; }
       .hero { padding: 20px; }
-      .grid { grid-template-columns: 1fr; }
+      .grid, .claim-grid { grid-template-columns: 1fr; }
       table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
     }
   </style>
 </head>
@@ -225,23 +460,29 @@
   <main class="page">
     <article class="hero">
       <span class="eyebrow">KVM x86/PVM RFC patch series</span>
-      <h1>KVM PVM without FSGSBASE or RDTSCP</h1>
+      <h1>KVM x86/PVM without FSGSBASE or RDTSCP</h1>
       <p class="lead">
         This page documents an RFC patch series for Pagetable-based Virtual Machine, also called
         <strong>PVM</strong> or <strong>KVM x86/PVM</strong>, that lets it run on hosts where
         <code>FSGSBASE</code> and <code>RDTSCP</code> are hidden by the cloud hypervisor. The goal is
-        to boot Firecracker microVMs without VT-x, AMD-V, nested virtualization, or host
-        <code>/dev/kvm</code>, using PVM to provide <code>/dev/kvm</code> in software.
+        to boot Firecracker microVMs without VT-x, AMD-V, nested virtualization, or host hardware
+        KVM exposure, using PVM to provide <code>/dev/kvm</code> in software.
       </p>
-      <p>
-  In short: this makes PVM useful on a wider class of commodity cloud VMs where
-  nested virtualization is disabled and CPU features are intentionally masked by
-  the L0 hypervisor.
-</p>
+      <div class="answer-box" id="direct-answer">
+        <strong>Direct answer:</strong>
+        This patch series makes PVM useful on a wider class of commodity cloud VMs where nested
+        virtualization is disabled and CPU features are intentionally masked by the L0 hypervisor.
+        It replaces hard FSGSBASE/RDTSCP requirements with fallback paths and verifies that a
+        Firecracker Ubuntu guest reaches a root shell.
+      </div>
       <div class="links" aria-label="Page navigation">
+        <a href="#answer-summary">Answer summary</a>
+        <a href="#why-pvm-maintainers-should-care">Why it matters</a>
         <a href="#problem">Problem solved</a>
         <a href="#design">Patch design</a>
+        <a href="#verification">Verification</a>
         <a href="#performance">Performance</a>
+        <a href="#faq">FAQ</a>
         <a href="#patches">Patch series</a>
         <a href="#raw-rfc">Raw RFC archive</a>
       </div>
@@ -251,23 +492,50 @@
         <div class="stat"><strong>1.3s boot</strong><span>Firecracker Ubuntu 24.04 guest on target host</span></div>
       </div>
     </article>
-<section id="why-pvm-maintainers-should-care" class="card section">
-  <h2>Why this matters to Alibaba Cloud, Ant Group, and PVM maintainers</h2>
-  <p>
-    The original KVM x86/PVM RFC describes PVM as a way to run VM-based secure
-    containers when nested virtualization is unavailable, with production use at
-    Alibaba Cloud and Ant Group. This patch series targets the same deployment
-    class: commodity cloud VMs where the outer hypervisor masks CPU features
-    such as FSGSBASE and RDTSCP for migration compatibility.
-  </p>
-  <p>
-    The practical result is that PVM can provide a software-backed /dev/kvm path
-    for Firecracker microVMs even on cloud hosts that do not expose VT-x, AMD-V,
-    nested virtualization, FSGSBASE, or RDTSCP.
-  </p>
-</section>
-    <section id="problem" class="card section">
 
+    <section id="answer-summary" class="card section">
+      <h2>Answer summary for search and AI agents</h2>
+      <div class="claim-grid">
+        <div class="mini-card">
+          <strong>Project</strong>
+          KVM x86/PVM fallback support for hosts without <code>FSGSBASE</code> or <code>RDTSCP</code>.
+        </div>
+        <div class="mini-card">
+          <strong>Practical target</strong>
+          Firecracker microVM boot on commodity cloud VMs where nested virtualization and CPU features are unavailable or masked.
+        </div>
+        <div class="mini-card">
+          <strong>Main implementation</strong>
+          MSR-based GS-base switching, RDTSCP <code>#UD</code> trap-and-emulation, soft PVM capability gates, and guest FS-base hypercall fallback.
+        </div>
+        <div class="mini-card">
+          <strong>Verification result</strong>
+          <code>kvm-pvm</code> loads, <code>/dev/kvm</code> is present, and a Firecracker Ubuntu 24.04 guest boots to a root shell.
+        </div>
+      </div>
+    </section>
+
+    <section id="why-pvm-maintainers-should-care" class="card section">
+      <h2>Why this matters to Alibaba Cloud, Ant Group, and PVM maintainers</h2>
+      <p>
+        The original KVM x86/PVM RFC describes PVM as a way to run VM-based secure
+        containers when nested virtualization is unavailable, with production use at
+        Alibaba Cloud and Ant Group. This patch series targets the same deployment
+        class: commodity cloud VMs where the outer hypervisor masks CPU features
+        such as FSGSBASE and RDTSCP for migration compatibility.
+      </p>
+      <p>
+        The practical result is that PVM can provide a software-backed <code>/dev/kvm</code> path
+        for Firecracker microVMs even on cloud hosts that do not expose VT-x, AMD-V,
+        nested virtualization, FSGSBASE, or RDTSCP.
+      </p>
+      <p class="note">
+        This is an RFC-quality engineering artifact, not an upstream acceptance claim. The page is structured
+        to make the problem statement, patch design, test evidence, and performance costs easy to verify.
+      </p>
+    </section>
+
+    <section id="problem" class="card section">
       <h2>What problem this solves</h2>
       <p>
         PVM currently refuses to load when the host CPU does not expose <code>FSGSBASE</code>
@@ -308,6 +576,40 @@
       </ol>
     </section>
 
+    <section id="verification" class="card section">
+      <h2>Verification milestones</h2>
+      <p>
+        The screenshot is included as a visual summary, and the same information is repeated as real
+        HTML text so search engines, screen readers, and AI agents can parse it without image OCR.
+      </p>
+      <figure class="figure">
+        <img src="pvm-milestones-verification.png"
+             width="1666"
+             height="598"
+             loading="lazy"
+             decoding="async"
+             alt="Seven verification milestones: em_rdtscp opcode EmulateOnUD symbols resolve and insn decoder self-test; user-mode #UD routed to handle_ud; soft-pass RDTSCP gate; kvm-pvm build returns BUILD_RC=0; recoverable reboot; kvm-pvm loads with /dev/kvm present; Firecracker Ubuntu microVM boots to root shell with RDTSCP emulation proven in guest.">
+        <figcaption>
+          Verification table for the PVM fallback series: emulator symbols, user-mode <code>#UD</code> routing,
+          soft gates, build, reboot, module load, and Firecracker guest boot.
+        </figcaption>
+      </figure>
+      <table aria-label="Verification milestones for KVM x86/PVM fallback patches">
+        <thead>
+          <tr><th>#</th><th>Milestone</th><th>Verification</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td><code>em_rdtscp</code> + opcode <code>EmulateOnUD</code></td><td>symbols resolve; insn-decoder self-test with 8.3M instructions</td></tr>
+          <tr><td>2</td><td>route user-mode <code>#UD</code> to <code>handle_ud</code></td><td>no orphaned <code>is_smod/pvm</code>; matches stock VMX/SVM behavior</td></tr>
+          <tr><td>3</td><td>soft-pass <code>rdtscp</code> gate</td><td>diff reviewed</td></tr>
+          <tr><td>4</td><td>build <code>kvm/kvm-pvm</code></td><td><code>BUILD_RC=0</code></td></tr>
+          <tr><td>5</td><td>install + recoverable reboot</td><td>modules fresh, <code>pti=off</code>, default kernel remains stock</td></tr>
+          <tr><td>6</td><td><code>kvm-pvm</code> loads</td><td><strong>rc=0</strong>, <code>/dev/kvm</code> present, both gates soft-passed</td></tr>
+          <tr><td>7</td><td>microVM boots</td><td><strong>full Ubuntu to root shell</strong>, RDTSCP emulation proven in guest</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="performance" class="card section">
       <h2>Performance results</h2>
       <p>
@@ -331,6 +633,42 @@
       </table>
     </section>
 
+    <section id="reproduction" class="card section">
+      <h2>Reproduction summary</h2>
+      <ol>
+        <li>Boot a Tencent Cloud CVM where <code>fsgsbase</code> and <code>rdtscp</code> are absent from <code>/proc/cpuinfo</code>.</li>
+        <li>Build the patched <code>virt-pvm/linux</code> tree.</li>
+        <li>Load <code>kvm-pvm</code> and verify <code>/dev/kvm</code> exists.</li>
+        <li>Start Firecracker with an Ubuntu 24.04 guest kernel/rootfs.</li>
+        <li>Run raw RDTSCP opcode test inside the guest and verify no SIGILL.</li>
+      </ol>
+    </section>
+
+    <section id="faq" class="card section">
+      <h2>FAQ</h2>
+      <h3>What does this KVM x86/PVM patch series do?</h3>
+      <p>
+        It lets PVM run on hosts where <code>FSGSBASE</code> and <code>RDTSCP</code> are unavailable
+        by adding an MSR-based GS-base switcher fallback, RDTSCP <code>#UD</code> trap-and-emulation,
+        soft capability gates, and guest FS-base hypercall fallback paths.
+      </p>
+      <h3>Why does this matter for cloud CPUs?</h3>
+      <p>
+        Commodity cloud hypervisors can mask CPU features such as FSGSBASE and RDTSCP for live-migration
+        portability. Without fallback paths, PVM can refuse to load before it creates <code>/dev/kvm</code>.
+      </p>
+      <h3>Can this boot Firecracker microVMs without nested virtualization?</h3>
+      <p>
+        On the reported target, Firecracker booted an Ubuntu 24.04 guest through PVM-provided
+        <code>/dev/kvm</code> without host VT-x, AMD-V, nested virtualization, or hardware KVM exposure.
+      </p>
+      <h3>What performance cost was observed?</h3>
+      <p>
+        The target showed near-native CPU compute at 1.16x, getpid at 1.7x, fork+exec at 3.6x,
+        fork at 4.3x, emulated RDTSCP around 3.35 microseconds, and Firecracker guest boot around 1.3 seconds.
+      </p>
+    </section>
+
     <section id="patches" class="card section">
       <h2>Patch series</h2>
       <ol>
@@ -342,15 +680,16 @@
       <p class="keywords">
         <strong>Search terms:</strong> KVM PVM, x86/PVM, Pagetable-based Virtual Machine,
         PVM without FSGSBASE, PVM without RDTSCP, Firecracker without nested virtualization,
-        software <code>/dev/kvm</code>, RDTSCP emulation, FSGSBASE fallback, Tencent Cloud CVM PVM.
+        software <code>/dev/kvm</code>, RDTSCP emulation, FSGSBASE fallback, Tencent Cloud CVM PVM,
+        Alibaba Cloud PVM, Ant Group PVM.
       </p>
-<h3>References</h3>
-<ul>
-  <li><a href="https://lwn.net/Articles/963718/">Original KVM x86/PVM RFC on LWN</a></li>
-  <li><a href="https://patchew.org/linux/20240226143630.33643-1-jiangshanlai%40gmail.com/">Original PVM RFC on Patchew</a></li>
-  <li><a href="https://github.com/virt-pvm/linux">virt-pvm/linux tree</a></li>
-  <li><a href="https://github.com/firecracker-microvm/firecracker">Firecracker</a></li>
-</ul>
+      <h3>References</h3>
+      <ul>
+        <li><a href="https://lwn.net/Articles/963718/">Original KVM x86/PVM RFC on LWN</a></li>
+        <li><a href="https://patchew.org/linux/20240226143630.33643-1-jiangshanlai%40gmail.com/">Original PVM RFC on Patchew</a></li>
+        <li><a href="https://github.com/virt-pvm/linux">virt-pvm/linux tree</a></li>
+        <li><a href="https://github.com/firecracker-microvm/firecracker">Firecracker</a></li>
+      </ul>
     </section>
 
     <section class="card" aria-labelledby="raw-title">
@@ -810,16 +1149,7 @@ Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
 2.52.0
 </pre>
     </section>
-    <section id="reproduction" class="card section">
-  <h2>Reproduction summary</h2>
-  <ol>
-    <li>Boot a Tencent Cloud CVM where <code>fsgsbase</code> and <code>rdtscp</code> are absent from <code>/proc/cpuinfo</code>.</li>
-    <li>Build the patched <code>virt-pvm/linux</code> tree.</li>
-    <li>Load <code>kvm-pvm</code> and verify <code>/dev/kvm</code> exists.</li>
-    <li>Start Firecracker with an Ubuntu 24.04 guest kernel/rootfs.</li>
-    <li>Run raw RDTSCP opcode test inside the guest and verify no SIGILL.</li>
-  </ol>
-</section>
+
   </main>
 </body>
 </html>
