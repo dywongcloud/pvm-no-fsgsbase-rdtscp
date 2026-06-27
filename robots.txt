@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://dywongcloud.github.io/sitemap.xml
+Sitemap: https://dywongcloud.github.io/pvm-no-fsgsbase-rdtscp/sitemap.xml
