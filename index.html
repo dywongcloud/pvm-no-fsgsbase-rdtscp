@@ -475,8 +475,8 @@
       <h1>x86/PVM without FSGSBASE or RDTSCP</h1>
       <p class="lead">
         This page documents an RFC patch series for Pagetable-based Virtual Machine, also called
-        <strong>PVM</strong> or <strong>KVM x86/PVM</strong>, that lets it run KVM in the userspace on hosts where
-        <code>FSGSBASE</code> and <code>RDTSCP</code> are hidden by the cloud hypervisor, arbitrary Intel Xeon E5-2600 v4 CPU. (Commoditty Cloud Hardware) The goal is
+        <strong>PVM</strong> or <strong>KVM x86/PVM</strong>, that lets it run KVM in userspace on hosts where
+        <code>FSGSBASE</code> and <code>RDTSCP</code> are hidden by the cloud hypervisor on a commodity Intel Xeon E5-2600 v4 CPU. The goal is
         to boot Firecracker microVMs without VT-x, AMD-V, nested virtualization, or host hardware
         KVM exposure, using PVM to provide <code>/dev/kvm</code> in software.
       </p>
