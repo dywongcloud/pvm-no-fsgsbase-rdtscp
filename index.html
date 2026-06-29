@@ -496,6 +496,7 @@
         <a href="#performance">Performance</a>
         <a href="#faq">FAQ</a>
         <a href="#patches">Patch series</a>
+        <a href="#forward-port">6.12 → 7.1 port</a>
         <a href="#raw-rfc">Raw RFC archive</a>
       </div>
       <div class="grid" aria-label="Project highlights">
@@ -707,6 +708,58 @@
         <li><a href="https://patchew.org/linux/20240226143630.33643-1-jiangshanlai%40gmail.com/">Original PVM RFC on Patchew</a></li>
         <li><a href="https://github.com/virt-pvm/linux">virt-pvm/linux tree</a></li>
         <li><a href="https://github.com/firecracker-microvm/firecracker">Firecracker</a></li>
+      </ul>
+      <h3>Downloads</h3>
+      <ul>
+        <li><a href="patches/0001x86pvmvdsogetcpulslfallback.patch">0001-x86-pvm-vdso-getcpu-lsl-fallback.patch</a> — guest vdso <code>getcpu</code> LSL-from-GDT fallback.</li>
+      </ul>
+    </section>
+
+    <section id="forward-port" class="card section">
+      <h2>6.12 → 7.1 mainline forward-port</h2>
+      <p>
+        The FSGSBASE/RDTSCP fallback series above targets PVM's <code>6.12.33</code>
+        base. The same PVM stack has since been <strong>forward-ported onto mainline
+        Linux 7.1</strong> across nine incremental stable hops (6.12 → 6.13 → … → 7.1),
+        building at each step. On the 7.1 PVM host a Firecracker microVM boots a full
+        Ubuntu 24.04 guest end-to-end to a root shell (<code>RESULT_GUEST_UP=1</code>),
+        on a Tencent CVM that still lacks FSGSBASE and RDTSCP.
+      </p>
+      <p>On top of the rebased PVM feature, the forward-port adds three classes of fix:</p>
+      <ol>
+        <li>
+          <strong>Build / API-drift fixes</strong> across the churned x86 entry and KVM
+          x86 core: the 7.1 KVM module-export namespace (<code>EXPORT_SYMBOL_FOR_KVM</code>),
+          the <code>CONFIG_X86_FRED</code> software-dispatch requirement, and helper renames
+          such as <code>text_poke_queue</code> → <code>smp_text_poke_batch_add</code>.
+        </li>
+        <li>
+          <strong>MSR-hypercall routing</strong> — route guest MSR hypercalls through PVM's
+          own <code>pvm_{get,set}_msr</code> so the guest's <code>MSR_PVM_VCPU_STRUCT</code>
+          (PVCS) write is no longer silently dropped before early boot completes.
+        </li>
+        <li>
+          <strong>Host <code>task_pt_regs</code> restore</strong> — preserve the userspace
+          VMM register frame across a guest run so the first userspace-bound exit
+          (<code>KVM_EXIT_IO</code> for guest PCI-config port I/O) resumes Firecracker
+          instead of the guest.
+        </li>
+      </ol>
+      <p class="note">
+        Host kernel cmdline on a CPU without FSGSBASE/RDTSCP:
+        <code>pti=off fred=off spectre_v2=off</code>. <code>spectre_v2=off</code> removes a
+        switcher RSB-VMEXIT <code>int3</code> seen on this nested host while keeping
+        MDS/TAA/MMIO/L1TF mitigations active — strictly narrower than
+        <code>mitigations=off</code>.
+      </p>
+      <h3>Download</h3>
+      <ul>
+        <li>
+          <a href="patches/pvm6.12to7.1complete.patch">pvm-6.12-to-7.1-complete.patch</a>
+          — the complete PVM-on-7.1 stack as one unified diff (feature +
+          no-FSGSBASE/RDTSCP support + every forward-port and runtime fix); applies
+          onto a pristine upstream <code>v7.1</code> tree.
+        </li>
       </ul>
     </section>
 
