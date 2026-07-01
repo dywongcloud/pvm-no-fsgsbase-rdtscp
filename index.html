@@ -765,15 +765,15 @@
 
     <section class="card" aria-labelledby="raw-title">
       <div id="raw-title" class="archive-title">Raw RFC patch archive</div>
-      <pre id="raw-rfc" style="margin:0;padding:16px;overflow-x:auto;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:12.5px;line-height:1.45;color:#24292e;background:#ffffff;"><span style="color:#6f42c1;font-weight:bold">From:</span>         Dylan Wong &lt;dyowng-AT-global.tencent.com&gt;
+      <pre id="raw-rfc" style="margin:0;padding:16px;overflow-x:auto;white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:12.5px;line-height:1.45;color:#24292e;background:#ffffff;"><span style="color:#6f42c1;font-weight:bold">From:</span>         Dylan Wong &lt;dywong-AT-global.tencent.com&gt;
 <span style="color:#6f42c1;font-weight:bold">To:</span>         linux-kernel-AT-vger.kernel.org
 <span style="color:#6f42c1;font-weight:bold">Subject:</span>         [RFC PATCH 0/4] KVM: x86/PVM: run the switcher and guest without FSGSBASE/RDTSCP
 <span style="color:#6f42c1;font-weight:bold">Date:</span>         Sat, 27 Jun 2026 06:13:50 +0800
-<span style="color:#6f42c1;font-weight:bold">Message-ID:</span>         &lt;20260627061350.33643-1-dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">Message-ID:</span>         &lt;20260627061350.33643-1-dywong@global.tencent.com&gt;
 <span style="color:#6f42c1;font-weight:bold">Cc:</span>         Lai Jiangshan &lt;jiangshanlai-AT-gmail.com&gt;, Hou Wenlong &lt;houwenlong.hwl-AT-antgroup.com&gt;, Sean Christopherson &lt;seanjc-AT-google.com&gt;, Paolo Bonzini &lt;pbonzini-AT-redhat.com&gt;, Thomas Gleixner &lt;tglx-AT-linutronix.de&gt;, Borislav Petkov &lt;bp-AT-alien8.de&gt;, Ingo Molnar &lt;mingo-AT-redhat.com&gt;, x86-AT-kernel.org, kvm-AT-vger.kernel.org
 <span style="color:#6f42c1;font-weight:bold">Archive-link:</span>         Article
 
-<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dywong@global.tencent.com&gt;
 
 Hello,
 
@@ -901,7 +901,7 @@ Dylan Wong (4):
 2.52.0
 
 
-<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
 <span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 1/4] x86/entry: PVM switcher gsbase switch without FSGSBASE
 
@@ -921,7 +921,7 @@ value) and RDX (arg3) carry live guest state, so the fallback saves and restores
 RAX/RDX around the MSR access (RCX is reloaded by the surrounding code). Both
 fallback paths reproduce the exact end state of the FSGSBASE fast path.
 
-Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+Signed-off-by: Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="background:#ffeef0;color:#b31d28">---</span>
  arch/x86/entry/entry_64_switcher.S | 81 +++++++++++++++++++++++++++---
  1 file changed, 74 insertions(+), 7 deletions(-)
@@ -1037,7 +1037,7 @@ Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
 2.52.0
 
 
-<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
 <span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 2/4] KVM: x86: emulate RDTSCP on #UD
 
@@ -1048,7 +1048,7 @@ on em_rdtsc()) and flag the opcode EmulateOnUD so KVM emulates it precisely when
 the host cannot execute it. This is used by PVM (patch 3) to keep the guest vdso
 getcpu working on hosts that mask RDTSCP.
 
-Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+Signed-off-by: Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="background:#ffeef0;color:#b31d28">---</span>
  arch/x86/kvm/emulate.c | 14 +++++++++++++-
  1 file changed, 13 insertions(+), 1 deletion(-)
@@ -1089,7 +1089,7 @@ Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
 2.52.0
 
 
-<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
 <span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 3/4] KVM: x86/PVM: soft-gate FSGSBASE/RDTSCP and emulate
  guest user-mode #UD
@@ -1105,7 +1105,7 @@ EmulateOnUD allowlist (now including RDTSCP) and reflects #UD back to the guest
 for everything else -- the same behaviour stock VMX/SVM already implement for all
 guest #UD.
 
-Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+Signed-off-by: Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="background:#ffeef0;color:#b31d28">---</span>
  arch/x86/kvm/pvm/pvm.c | 26 +++++++++++++-------------
  1 file changed, 13 insertions(+), 13 deletions(-)
@@ -1158,7 +1158,7 @@ Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
 2.52.0
 
 
-<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dyowng@global.tencent.com&gt;
+<span style="color:#6f42c1;font-weight:bold">From:</span> Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="color:#6f42c1;font-weight:bold">Date:</span> Sat, 27 Jun 2026 06:13:50 +0800
 <span style="color:#6f42c1;font-weight:bold">Subject:</span> [RFC PATCH 4/4] x86/pvm: read/write guest FS base via hypercall
  without FSGSBASE
@@ -1170,7 +1170,7 @@ instructions on cpu_feature_enabled(X86_FEATURE_FSGSBASE) and otherwise defer
 the FS base read/write to the hypervisor via PVM_HC_RD/WRMSR -- the mechanism the
 MSR_GS_BASE case already uses.
 
-Signed-off-by: Dylan Wong &lt;dyowng@global.tencent.com&gt;
+Signed-off-by: Dylan Wong &lt;dywong@global.tencent.com&gt;
 <span style="background:#ffeef0;color:#b31d28">---</span>
  arch/x86/kernel/pvm.c | 16 ++++++++++++----
  1 file changed, 12 insertions(+), 4 deletions(-)
