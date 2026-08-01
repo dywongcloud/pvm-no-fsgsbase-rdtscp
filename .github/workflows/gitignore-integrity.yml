@@ -1,0 +1,76 @@
+name: gitignore integrity
+
+# Guards against the exact bug fixed in this repo's history: a Linux-kernel-style
+# ".gitignore" rule ("*.s") that also matches real ".S" assembly sources whenever
+# git evaluates it case-insensitively (core.ignorecase=true, e.g. a checkout
+# authored on macOS/Windows or with an inherited case-insensitive git config).
+# That silently dropped ~1340 tracked-looking files -- including the PVM
+# switcher itself, arch/x86/entry/entry_64_switcher.S -- from version control.
+#
+# The check runs with core.ignorecase forced to true regardless of the runner's
+# real filesystem, so it reproduces the bug class even on a case-sensitive
+# Linux CI runner. This mirrors the Linux kernel's own in-tree check
+# (scripts/misc-check's check_tracked_ignored_files(), added for the same
+# reason: https://lore.kernel.org/lkml/Y62i1bwkYfhg2PSl@fjasle.eu/).
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check-tracked-ignored-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Find tracked files a case-insensitive .gitignore would silently drop
+        run: |
+          set -euo pipefail
+
+          # Known, pre-existing upstream quirk: these same 7 paths are flagged
+          # in a pristine torvalds/linux checkout too (verified against v7.1),
+          # nothing PVM-specific introduced them, and there is no local
+          # .gitignore rule to fix -- allowlisted so this check stays
+          # meaningful (red only on a *new* regression) instead of permanently
+          # red on an inherited-and-unfixable-here upstream trait.
+          allowlist='
+          tools/perf/scripts/perl/Perf-Trace-Util/lib/Perf/Trace/Context.pm
+          tools/perf/scripts/perl/Perf-Trace-Util/lib/Perf/Trace/Core.pm
+          tools/perf/scripts/perl/Perf-Trace-Util/lib/Perf/Trace/Util.pm
+          tools/perf/scripts/python/Perf-Trace-Util/lib/Perf/Trace/Core.py
+          tools/perf/scripts/python/Perf-Trace-Util/lib/Perf/Trace/EventClass.py
+          tools/perf/scripts/python/Perf-Trace-Util/lib/Perf/Trace/SchedGui.py
+          tools/perf/scripts/python/Perf-Trace-Util/lib/Perf/Trace/Util.py
+          '
+
+          found=0
+          for dir in . kernel; do
+            [ -d "$dir" ] || continue
+            echo "== checking $dir =="
+            if [ -f "$dir/.gitignore" ]; then
+              hits=$(cd "$dir" && git -c core.ignorecase=true ls-files -i -c --exclude-standard)
+            else
+              hits=""
+            fi
+            if [ "$dir" = "kernel" ]; then
+              hits=$(comm -23 <(echo "$hits" | sed '/^$/d' | sort) <(echo "$allowlist" | sed '/^$/d' | sed 's/^[[:space:]]*//' | sort))
+            fi
+            if [ -n "$hits" ]; then
+              echo "$hits"
+              found=1
+            fi
+          done
+          if [ "$found" -ne 0 ]; then
+            echo
+            echo "ERROR: the above tracked files would be silently gitignored on a" >&2
+            echo "case-insensitive checkout (core.ignorecase=true). Add an explicit" >&2
+            echo "negation (e.g. \"!*.S\") to the relevant .gitignore, or rename the" >&2
+            echo "colliding path." >&2
+            exit 1
+          fi
+          echo "OK: no unexpected tracked file is at risk of case-insensitive gitignore collision."

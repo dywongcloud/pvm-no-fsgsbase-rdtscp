@@ -1993,6 +1993,19 @@ void enable_sep_cpu(void)
 static __init void identify_boot_cpu(void)
 {
 	identify_cpu(&boot_cpu_data);
+
+	/*
+	 * A PVM guest may only use RDTSCP for the vDSO getcpu() optimization
+	 * when the underlying host actually supports RDTSCP; otherwise it must
+	 * fall back to LSL.  RDTSCP is now known (identify_cpu() above ran the
+	 * CPUID scan) and this runs before both the kernel and the vDSO image
+	 * ALTERNATIVE passes, so record the compound condition in a synthetic
+	 * feature bit that the vdso_read_cpunode() alternative gates on.
+	 */
+	if (cpu_feature_enabled(X86_FEATURE_KVM_PVM_GUEST) &&
+	    boot_cpu_has(X86_FEATURE_RDTSCP))
+		setup_force_cpu_cap(X86_FEATURE_PVM_RDTSCP);
+
 	if (HAS_KERNEL_IBT && cpu_feature_enabled(X86_FEATURE_IBT))
 		pr_info("CET detected: Indirect Branch Tracking enabled\n");
 #ifdef CONFIG_X86_32

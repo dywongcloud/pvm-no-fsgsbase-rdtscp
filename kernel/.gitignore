@@ -43,6 +43,18 @@
 *.rpm
 *.rsi
 *.s
+#
+# On a case-insensitive filesystem (e.g. macOS APFS, or any checkout with
+# core.ignorecase=true) the "*.s" rule above also matches real, hand-written
+# uppercase ".S" assembly sources -- including arch/x86/entry/entry_64.S and
+# the PVM switcher itself, arch/x86/entry/entry_64_switcher.S. That silently
+# dropped ~1300 tracked ".S" files from this repository (see git history for
+# the restoration commit). Force ".S" back in, then re-ignore the two
+# generated dtb-wrapped-as-assembly patterns that are supposed to match it.
+!*.S
+*.dtb.S
+*.dtbo.S
+.tmp_vmlinux*.S
 *.so
 *.so.dbg
 *.su
