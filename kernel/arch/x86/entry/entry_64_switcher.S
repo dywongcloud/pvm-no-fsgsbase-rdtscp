@@ -158,13 +158,50 @@ SYM_INNER_LABEL(entry_SYSCALL_64_switcher_safe_stack, SYM_L_GLOBAL)
 	movq	%rcx, RIP-ORIG_RAX(%rsp)
 	movq	TSS_extra(smod_gsbase), %r11
 
-	/* switch host gsbase to guest gsbase, TSS_extra can't be use afterward */
-	swapgs
+	/*
+	 * Switch host gsbase to guest gsbase, save the guest user-mode gsbase
+	 * into the PVCS and load smod_gsbase as the active gsbase. TSS_extra
+	 * can't be used afterward.
+	 *
+	 * With FSGSBASE, swap to the guest gsbase and use rd/wrgsbase (fast).
+	 * Without FSGSBASE those instructions are unavailable, so manipulate
+	 * MSR_KERNEL_GS_BASE directly and let the trailing swapgs install
+	 * smod_gsbase as the active gsbase. Both paths leave the active
+	 * gsbase == smod_gsbase and MSR_KERNEL_GS_BASE == host gsbase.
+	 */
+	ALTERNATIVE "jmp .L_ds_to_smod_no_fsgsbase", "", X86_FEATURE_FSGSBASE
 
-	/* save guest gsbase as user_gsbase and switch to smod_gsbase */
+	/* FSGSBASE fast path */
+	swapgs
 	rdgsbase %rcx
 	movq	%rcx, PVCS_user_gsbase(%rdi)
 	wrgsbase %r11
+	jmp	.L_ds_to_smod_gsbase_done
+
+.L_ds_to_smod_no_fsgsbase:
+	/*
+	 * rd/wrmsr clobber rax/rcx/rdx. rcx is reloaded below, but rax (guest
+	 * syscall nr) and rdx (guest syscall arg3) must reach smod intact, so
+	 * save and restore them around the MSR accesses.
+	 */
+	pushq	%rax
+	pushq	%rdx
+	/* read the guest user gsbase from MSR_KERNEL_GS_BASE (edx:eax) */
+	movl	$MSR_KERNEL_GS_BASE, %ecx
+	rdmsr
+	shlq	$32, %rdx
+	orq	%rdx, %rax
+	movq	%rax, PVCS_user_gsbase(%rdi)
+	/* program MSR_KERNEL_GS_BASE with smod_gsbase, swapgs makes it active */
+	movq	%r11, %rdx
+	movl	%r11d, %eax
+	shrq	$32, %rdx
+	movl	$MSR_KERNEL_GS_BASE, %ecx
+	wrmsr
+	popq	%rdx
+	popq	%rax
+	swapgs
+.L_ds_to_smod_gsbase_done:
 
 	/* restore umod rdi and smod rflags/r11, rip/rcx and rsp for sysretq */
 	popq	%rdi
@@ -204,13 +241,45 @@ SYM_INNER_LABEL(entry_SYSRETQ_switcher_unsafe_stack, SYM_L_GLOBAL)
 	movq	TSS_extra(umod_cr3), %rcx
 	movq	%rcx, %cr3
 
-	/* switch host gsbase to guest gsbase, TSS_extra can't be use afterward */
-	swapgs
+	/*
+	 * Switch host gsbase to guest gsbase and install the guest user-mode
+	 * gsbase as the active gsbase. TSS_extra can't be used afterward.
+	 *
+	 * With FSGSBASE, swap to the guest gsbase and use wrgsbase (fast).
+	 * Without FSGSBASE, write the user gsbase into MSR_KERNEL_GS_BASE and
+	 * let the trailing swapgs install it as the active gsbase. Both paths
+	 * leave the active gsbase == user gsbase and MSR_KERNEL_GS_BASE == host
+	 * gsbase.
+	 */
+	ALTERNATIVE "jmp .L_ds_to_umod_no_fsgsbase", "", X86_FEATURE_FSGSBASE
 
-	/* write umod gsbase */
+	/* FSGSBASE fast path */
+	swapgs
 	movq	PVCS_user_gsbase(%rdi), %rcx
 	canonical_rcx
 	wrgsbase %rcx
+	jmp	.L_ds_to_umod_gsbase_done
+
+.L_ds_to_umod_no_fsgsbase:
+	/*
+	 * wrmsr clobbers rax/rcx/rdx. rcx is reloaded below, but rax (guest
+	 * syscall return value) and rdx must reach umod intact, so save and
+	 * restore them around the MSR access.
+	 */
+	pushq	%rax
+	pushq	%rdx
+	movq	PVCS_user_gsbase(%rdi), %rcx
+	canonical_rcx
+	/* program MSR_KERNEL_GS_BASE with the user gsbase, swapgs makes it active */
+	movq	%rcx, %rdx
+	movl	%ecx, %eax
+	shrq	$32, %rdx
+	movl	$MSR_KERNEL_GS_BASE, %ecx
+	wrmsr
+	popq	%rdx
+	popq	%rax
+	swapgs
+.L_ds_to_umod_gsbase_done:
 
 	/* load flags, ip to sp0 stack and cx, r11, rdi to registers */
 	movl	PVCS_eflags(%rdi), %r11d

@@ -254,12 +254,16 @@ static inline void vdso_read_cpunode(unsigned *cpu, unsigned *node)
 	 *
 	 * If RDPID is available, use it.
 	 *
-	 * If it is PVM guest and RDPID is not available, use RDTSCP.
+	 * If it is a PVM guest whose host supports RDTSCP and RDPID is not
+	 * available, use RDTSCP.  X86_FEATURE_PVM_RDTSCP is set only when both
+	 * X86_FEATURE_KVM_PVM_GUEST and X86_FEATURE_RDTSCP are present, so on a
+	 * host without RDTSCP this arm is not patched in and the default LSL is
+	 * used instead.
 	 */
 	alternative_io_2("lsl %[seg],%[p]",
 			 ".byte 0x0f,0x01,0xf9\n\t" /* RDTSCP %eax:%edx, %ecx */
 			 "mov %%ecx,%%eax\n\t",
-			 X86_FEATURE_KVM_PVM_GUEST,
+			 X86_FEATURE_PVM_RDTSCP,
 			 ".byte 0xf3,0x0f,0xc7,0xf8", /* RDPID %eax/rax */
 			 X86_FEATURE_RDPID,
 			 [p] "=a" (p), [seg] "r" (__CPUNODE_SEG)
