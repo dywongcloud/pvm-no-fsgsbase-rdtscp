@@ -54,6 +54,7 @@
 !*.S
 *.dtb.S
 *.dtbo.S
+.tmp_vmlinux*.S
 *.so
 *.so.dbg
 *.su
