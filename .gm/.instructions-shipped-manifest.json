@@ -1,0 +1,8 @@
+{
+  "gates/long-gap-no-instruction.md": "da033e3ea43cae3ff20d577dca079ea0a3aa3128cb04743a596f8443aa18737b",
+  "residual/browser-open.md": "ba654ce97992b91acd84f32e46f55a118c641c2a739584e5cea2f74ac9b8edc4",
+  "residual/dirty-tree.md": "bdcd8354497086f5f662212701ecad7516fb14f6d46f24cc926fe90d98fcd04a",
+  "residual/imperative.md": "b688b551da2ec7a3caa7797f07df1d5a464506a3afca5449ddc08afcd07b8f90",
+  "residual/prd-open.md": "86a05ea414bad768c15c3feae5c0cb40311c75b9e86c11a15118a827cf19a8db",
+  "residual/tasks-running.md": "f8ca9f11f17e62325075c85a96d2606b9b84c09c80dcb37b10776b98eaf4585e"
+}
