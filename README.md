@@ -56,6 +56,14 @@ SSH-unreachable. Found and fixed, in order of severity:
    `xcr0`-switching performance fix, harmless and already validated
    upstream.
 
+Follow-up (2026-08-04): the write-up's operational recommendation is now
+implemented — the required host cmdline (`pti=off fred=off spectre_v2=off`)
+ships as a versioned GRUB drop-in under `provisioning/`, and
+`hardware_cap_check()` warns loudly at module load when a hypervisor guest
+masking FSGSBASE and RDTSCP still has RSB-fill-on-VM-exit active — the
+state `spectre_v2=off` exists to clear (active KPTI/FRED were already hard
+load refusals).
+
 Full details, what was checked and ruled out (the documented `spectre_v2=off`
 int3 workaround, the vcpu-run hot path, the not-yet-applied 6.12->7.1
 forward-port patch), and an operational recommendation are in

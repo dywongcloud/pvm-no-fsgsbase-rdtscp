@@ -3159,6 +3159,31 @@ static int __init hardware_cap_check(void)
 	if (!boot_cpu_has(X86_FEATURE_RDTSCP))
 		pr_info("RDTSCP not available; guest vdso getcpu RDTSCP will be "
 			"trapped and emulated (slower).\n");
+	/*
+	 * On at least one host of the class this project targets -- an outer
+	 * hypervisor masking both FSGSBASE and RDTSCP out of guest CPUID --
+	 * the RSB-fill-on-VM-exit sequence (FILL_RETURN_BUFFER in the
+	 * switcher's MITIGATION_ENTER) collided with the outer CPU's
+	 * non-architectural RSB-underflow behavior and crashed the host with
+	 * a spurious int3.  That observation is host-specific (a Bochs-BIOS
+	 * outer CPU); the condition below is only a heuristic for the host
+	 * class, so warn -- conditionally phrased -- rather than refuse to
+	 * load.  spectre_v2=off clears both RSB_VMEXIT feature bits and NOPs
+	 * the fill sequence out, and is the known-good configuration on the
+	 * verified host.
+	 */
+	if (boot_cpu_has(X86_FEATURE_HYPERVISOR) &&
+	    !boot_cpu_has(X86_FEATURE_FSGSBASE) &&
+	    !boot_cpu_has(X86_FEATURE_RDTSCP) &&
+	    (boot_cpu_has(X86_FEATURE_RSB_VMEXIT) ||
+	     boot_cpu_has(X86_FEATURE_RSB_VMEXIT_LITE))) {
+		pr_warn("This host masks FSGSBASE and RDTSCP but still fills the RSB on VM-exit.\n");
+		pr_warn("On feature-masked hosts whose outer CPU has non-architectural RSB-underflow\n");
+		pr_warn("behavior, that combination has crashed the host with a spurious int3 on\n");
+		pr_warn("VM-exit.  If this host is of that class, boot with spectre_v2=off.  Note:\n");
+		pr_warn("that disables host Spectre-v2 mitigations -- dedicated PVM hosts only.  See\n");
+		pr_warn("provisioning/README.md in the pvm-no-fsgsbase-rdtscp repository.\n");
+	}
 	if (!boot_cpu_has(X86_FEATURE_CX16)) {
 		pr_warn("CMPXCHG16B is required for guest.\n");
 		return -EOPNOTSUPP;

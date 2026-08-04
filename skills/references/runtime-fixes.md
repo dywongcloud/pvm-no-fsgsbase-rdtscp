@@ -178,3 +178,19 @@ config drop-in or equivalent), and add a boot-time self-check in
 it is running on a host where the dangerous combination is present but the
 mitigating cmdline isn't -- turning a silent future crash into an actionable,
 loud diagnostic at module-load time.
+
+**Status: implemented.** The cmdline now lives as a versioned GRUB drop-in
+in `provisioning/grub.d/99-pvm-host.cfg` (install/verify instructions and
+the security tradeoff in `provisioning/README.md`; it appends to
+`GRUB_CMDLINE_LINUX` so recovery-mode entries are covered too), and
+`hardware_cap_check()` in `kernel/arch/x86/kvm/pvm/pvm.c` logs a prominent
+multi-line `pr_warn` block at module load when
+`X86_FEATURE_HYPERVISOR` is set, FSGSBASE and RDTSCP are both masked, and
+`X86_FEATURE_RSB_VMEXIT`/`RSB_VMEXIT_LITE` is still set — a heuristic for
+this project's target host class booted without `spectre_v2=off`, phrased
+conditionally in the banner because the underlying int3 observation is
+host-specific (see the caveats above). Active KPTI and FRED were already
+hard `-EOPNOTSUPP` refusals — note those key on the dangerous *state*, not
+on the flags' presence (FRED defaults off; KPTI defaults off on
+Meltdown-unaffected CPUs), so `/proc/cmdline` remains the authoritative
+drift check; the warning covers the one dangerous-and-silent case.
